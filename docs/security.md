@@ -7,6 +7,7 @@
 - [Key handling](#key-handling)
 - [If the key is lost](#if-the-key-is-lost)
 - [Other risks](#other-risks)
+- [The same-disk check](#the-same-disk-check)
 - [How the tool limits damage](#how-the-tool-limits-damage)
 
 This is the author's own threat model. There has been no independent review.
@@ -63,6 +64,20 @@ What to do about it before it happens:
 - **A wrong clock.** Order and age come from the time in the file name. Backups dated more than a day ahead are never counted by retention and make the drill fail; a clock far in the past makes new backups look old, and the drill's age check then fails.
 - **The newest backup is only checked by the drill.** Retention counts a run as complete when both its files exist; if the newest one is damaged, each later run still deletes an older good one once `KEEP` is exceeded. Run the drill often relative to `KEEP`.
 - **The scratch folder briefly holds a decrypted copy of your data.** It is created with mode 0700, under `SCRATCH_DIR` (set it to an encrypted or private disk) and removed afterwards, also on failure. If the machine crashes mid-drill, a `lombovault-drill-*` folder may remain: delete it.
+
+## The same-disk check
+
+`backup`, `plan` and `doctor` compare the device id (`st_dev`) of every source with the device id of the backup folder (or, if it does not exist yet, of its nearest existing parent). If one matches, `backup` writes nothing and says so, and `doctor` shows FAIL: a backup on the disk that holds the data is lost together with the data. `LOMBO_VAULT_ALLOW_SAME_DISK=true` turns the check off for a person who knows better (for example two partitions they trust to fail separately, or a test).
+
+What the check **cannot see**, because the operating system reports one device id for what are really two disks, or different ids for one:
+
+- network shares (NFS, SMB) and FUSE mounts, which often report one id for the whole share;
+- bind mounts and container volume mounts, which can show the same id for a host folder and the disk behind it;
+- overlay filesystems (a container's own filesystem), which report one id for many layers and disks;
+- a pool such as mergerfs or a RAID or LVM volume: one id for the pool, however many disks sit behind it. Two folders in the same pool pass or fail together, and the check cannot tell whether the data and the backup land on the same member disk;
+- two partitions of one physical disk: different ids, so it passes although one failing disk takes both.
+
+Only the source path itself is compared, not mounts inside a source folder. The check errs on the side of warning: when the ids match it refuses even if the disks differ, and when it cannot read a device id it also refuses. It never reads or changes file contents, and it logs only the folder names you configured.
 
 ## How the tool limits damage
 

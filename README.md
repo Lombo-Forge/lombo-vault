@@ -83,7 +83,7 @@ Details: [docs/setup.md](docs/setup.md).
 
 ## Settings
 
-Everything is an environment variable with the `LOMBO_VAULT_` prefix, listed with defaults in [.env.example](.env.example). A bad value stops the app at start-up and names the variable. Note that `DRY_RUN` only controls **deleting old backups**: a backup is always written.
+Everything is an environment variable with the `LOMBO_VAULT_` prefix, listed with defaults in [.env.example](.env.example). A bad value stops the app at start-up and names the variable. `backup` refuses a backup folder on the same disk as a source (the backup would die with the data) and `doctor` shows FAIL, unless `LOMBO_VAULT_ALLOW_SAME_DISK=true`. Note that `DRY_RUN` only controls **deleting old backups**: a backup is always written.
 
 ## Scheduling
 
@@ -93,6 +93,7 @@ The tool runs once and exits; let cron or a systemd timer call it (examples in [
 
 - Not run against a real media stack or real app databases. SQLite files copied while an app is writing can be inconsistent; the tool does not prevent that (see [docs/how-it-works.md](docs/how-it-works.md)).
 - The real `age` 1.2.1 (Debian package) was exercised in a throwaway container: backup, drill, two recipients, wrong key, a flipped byte and a truncated file. No other age version, no `rage`, no SSH-key recipients (not supported), no passphrase mode (not supported).
+- The same-disk refusal is tested with made-up device ids, never with two real disks. It compares device ids only, so it cannot see network shares, bind mounts, overlay filesystems or disk pools (see [docs/security.md](docs/security.md)).
 - The webhook and ping were tested against a local server, not a real Discord, Slack or healthchecks service.
 - The fixes for the third audit (symlinked or empty sources, wrong clocks, junk file names, bad alert addresses, the drill's size and file-type checks) are covered by tests with the stand-in `age`; the real-`age` suite was re-run after them (see FIXES3-REPORT.md in the workspace). Disk-full and power-cut behaviour, two truly simultaneous runs, and a damaged-but-complete newest backup (only the drill, not retention, notices one) were reasoned about, not tested.
 - The manifest is not encrypted and holds an unsalted checksum of every file (see [docs/security.md](docs/security.md)).

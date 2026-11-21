@@ -27,6 +27,7 @@ SETTINGS = (
     "PING_URL",
     "DRILL_PING_URL",
     "DRY_RUN",
+    "ALLOW_SAME_DISK",
 )
 
 # An age public key: "age1" then 58 lowercase bech32 characters. SSH-key recipients are not accepted (kept simple).
@@ -52,6 +53,7 @@ class Config:
     ping_url: str | None
     drill_ping_url: str | None
     dry_run: bool
+    allow_same_disk: bool
 
 
 def _truthy(value: str, name: str) -> bool:
@@ -140,4 +142,5 @@ def from_env(env: dict[str, str]) -> Config:
         drill_ping_url=_url(get("DRILL_PING_URL"), "DRILL_PING_URL"),
         # Safe by default: old backups are only deleted after the person sets DRY_RUN=false.
         dry_run=_truthy(get("DRY_RUN", "true") or "true", "DRY_RUN"),
+        allow_same_disk=_truthy(get("ALLOW_SAME_DISK", "false") or "false", "ALLOW_SAME_DISK"),
     )
