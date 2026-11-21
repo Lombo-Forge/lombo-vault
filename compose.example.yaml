@@ -1,0 +1,25 @@
+# Runs one LomboVault command and exits. Schedule it from the host (cron or a systemd timer):
+#   docker compose -f compose.example.yaml run --rm lombo-vault backup
+#   docker compose -f compose.example.yaml run --rm lombo-vault drill
+# The paths in .env are paths INSIDE the container, so they must match the mounts below.
+services:
+  lombo-vault:
+    image: ghcr.io/lombo-forge/lombo-vault:latest   # or build: .
+    container_name: lombo-vault
+    env_file: .env
+    read_only: true
+    mem_limit: 256m
+    # Match the owner of the folders (a user that can read the sources and write the backup folder).
+    # user: "1000:1000"
+    tmpfs:
+      - /tmp
+    # The drill unpacks into LOMBO_VAULT_SCRATCH_DIR. /tmp here is memory: for a drill, mount a real folder and point
+    # LOMBO_VAULT_SCRATCH_DIR at it instead.
+    volumes:
+      # Sources: read-only, at the same paths as LOMBO_VAULT_SOURCES.
+      - /mnt/ssd/appdata:/mnt/ssd/appdata:ro
+      - /mnt/ssd/stack/compose.yaml:/mnt/ssd/stack/compose.yaml:ro
+      # The backup folder: read-write, at LOMBO_VAULT_BACKUP_DIR.
+      - /mnt/hdd/vault-backups:/mnt/hdd/vault-backups
+      # Only for the drill: the PRIVATE key file, read-only, at LOMBO_VAULT_KEY_FILE. Leave it out of a backup-only setup.
+      # - /path/to/vault-key.txt:/run/keys/vault-key.txt:ro
