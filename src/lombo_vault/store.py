@@ -48,11 +48,39 @@ def resolved_sources(cfg: Config) -> list[Path]:
     return [p.resolve() for p in cfg.sources]
 
 
+def device_of(path: Path) -> int:
+    """The device id (st_dev) of a path, or of its nearest existing parent when it is not there yet."""
+    probe = path
+    while not probe.exists() and probe != probe.parent:
+        probe = probe.parent
+    return os.stat(probe).st_dev
+
+
+def same_disk_problems(cfg: Config) -> list[str]:
+    """A backup on the same disk as its source dies with it. Compares device ids, so it cannot see through
+    network shares, bind mounts or overlay filesystems that report one id for two disks (docs/security.md)."""
+    if cfg.allow_same_disk:
+        return []
+    try:
+        dest = device_of(cfg.backup_dir.resolve())
+        same = [p for p in resolved_sources(cfg) if p.exists() and device_of(p) == dest]
+    except OSError as e:
+        return [f"cannot compare the disks of the sources and the backup folder: {e.strerror or e}"]
+    if not same:
+        return []
+    return [
+        f"the backup folder {cfg.backup_dir} is on the same disk as the source {same[0]}: the backup would be "
+        "lost together with the data. Use a folder on another disk, or set LOMBO_VAULT_ALLOW_SAME_DISK=true "
+        "if you know this is safe"
+    ]
+
+
 def check_layout(cfg: Config) -> list[str]:
     """Why the folders cannot be used (missing sources, backup folder inside a source...). Empty means fine."""
     problems = [f"source {p} does not exist" for p in cfg.sources if not p.exists()]
     sources = resolved_sources(cfg)
     problems += core.conflicts(cfg.backup_dir.resolve(), sources)
+    problems += same_disk_problems(cfg)
     for label, path in (("key file", cfg.key_file), ("scratch folder", cfg.scratch_dir)):
         if path is not None:
             inside = [s for s in sources if path.resolve().is_relative_to(s)]

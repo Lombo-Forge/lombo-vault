@@ -10,6 +10,8 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 
 import pytest
 
+from lombo_vault import store
+
 # A tiny reversible stand-in for age. NOT encryption: bytes are XOR-ed so that plaintext is not visible.
 # Header and key matching mimic the real thing closely enough to test the tool's behaviour:
 #   encrypt:  age -r RECIPIENT [-r ...]       (stdin -> stdout)
@@ -167,6 +169,13 @@ def env(tmp_path, tree, fake_age):
 @pytest.fixture(autouse=True)
 def _scratch(tmp_path):
     (tmp_path / "scratch").mkdir()
+
+
+@pytest.fixture(autouse=True)
+def _two_disks(tmp_path, monkeypatch):
+    """Everything lives on one real disk in tests, so pretend the backup folder is on its own disk."""
+    backups = tmp_path / "backups"
+    monkeypatch.setattr(store, "device_of", lambda p: 2 if p.is_relative_to(backups) else 1)
 
 
 def at(days_ago: float = 0, hour: int = 4) -> datetime:
