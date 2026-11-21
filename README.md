@@ -105,7 +105,7 @@ The tool runs once and exits; let cron or a systemd timer call it (examples in [
 
 **Why a whole new archive every time?** Simplicity: each file stands alone, so deleting an old one cannot break a newer one. It suits data measured in megabytes or a few gigabytes.
 
-**Where should the backups go?** Not on the disk that holds the data they protect, and not only in the same house. Copy the encrypted files elsewhere with your own tool (rsync, rclone, a USB drive). They are safe to copy because they are encrypted.
+**Where should the backups go?** Not on the disk that holds the data they protect, and not only in the same house. Copy the encrypted files elsewhere with your own tool. They are safe to copy because they are encrypted. [docs/setup.md](docs/setup.md#7-copy-the-backups-elsewhere) has an rsync and an rclone recipe, and [who should run it](docs/setup.md#6-who-runs-it).
 
 **Can I use my SSH key?** Not in this version: only `age1...` public keys.
 

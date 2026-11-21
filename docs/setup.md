@@ -8,6 +8,8 @@
 - [3. First backup](#3-first-backup)
 - [4. First drill](#4-first-drill)
 - [5. Scheduling](#5-scheduling)
+- [6. Who runs it](#6-who-runs-it)
+- [7. Copy the backups elsewhere](#7-copy-the-backups-elsewhere)
 - [Running in a container](#running-in-a-container)
 - [Restoring for real](#restoring-for-real)
 - [Moving to live retention](#moving-to-live-retention)
@@ -88,6 +90,52 @@ WantedBy=timers.target
 Make a second pair for `drill` with `OnCalendar=monthly` (or weekly). Cron works too: `30 4 * * * . /etc/lombo-vault.env && lombo-vault backup` needs the variables exported; a systemd `EnvironmentFile` is simpler.
 
 If an app must be stopped for a consistent copy ([how-it-works.md](how-it-works.md#live-databases)), use `ExecStartPre=` and `ExecStopPost=` lines to stop and start it.
+
+## 6. Who runs it
+
+Run the backup as one dedicated user (for example `vault`), not your own login and not an app's user.
+
+- Give that user **read** access to the folders in `SOURCES` only. Do not add it to groups it does not need.
+- The backup folder belongs to that user, mode `700`, so no app or other login can read or delete the backups. A
+  backup that every app can write to is a backup that a broken app can damage.
+- Never put the private key (`vault-key.txt`) on this machine unless you chose to drill on the server (step 4).
+- Running as root works and reads everything, but then a bug in the tool is a root bug. Use root only if a source
+  cannot be read any other way.
+
+```sh
+sudo useradd --system --home /var/lib/lombo-vault --create-home vault
+sudo install -d -o vault -g vault -m 700 /var/backups/lombo-vault
+```
+
+Use `User=vault` in the systemd service above. Check with `lombo-vault doctor` as that user.
+
+## 7. Copy the backups elsewhere
+
+A backup that sits on the machine it protects is lost with it. The files are encrypted, so copying them is safe.
+`lombo-vault` does not copy them for you: use one of these on **another** machine, so a hacked server cannot reach
+back and delete the copies. Replace the names in capitals.
+
+**rsync, pulled by the other machine** (the other machine logs in to the server with its own read-only ssh key):
+
+```sh
+rsync -a --partial -e ssh VAULT_USER@SERVER:/var/backups/lombo-vault/ /mnt/offsite/lombo-vault/
+```
+
+No `--delete`: when Vault's retention removes an old backup, the copy keeps it. Prune the copy yourself (for example
+`find /mnt/offsite/lombo-vault -mtime +90 -delete`) when you want it smaller. Run it from a timer after the backup time.
+
+**rclone to a cloud bucket or another remote** (set the remote up first with `rclone config`):
+
+```sh
+rclone copy /var/backups/lombo-vault REMOTE:lombo-vault --immutable
+```
+
+`copy` never deletes at the far end, and `--immutable` makes it refuse to change a file that is already there (backup
+names carry the time, so a changed old file means something is wrong). Give the remote's credentials write access
+but not delete access if the provider allows it.
+
+Whichever you pick, **drill the copy**, not just the original: copy the newest file somewhere with the key and run
+`lombo-vault drill` there (step 4). A copy nobody has restored is a guess.
 
 ## Running in a container
 
