@@ -10,13 +10,14 @@ lombo-vault prune    apply retention on its own (deletes only when DRY_RUN=false
 
 import argparse
 import os
+import shutil
 import stat
 import sys
 import tempfile
 from collections.abc import Callable
 from datetime import UTC, datetime
 
-from . import __version__, agebin, core, notify, store
+from . import __version__, agebin, command, core, notify, status, store
 from .config import PREFIX, SETTINGS, Config, ConfigError, from_env
 from .drill import run_drill
 
@@ -41,6 +42,16 @@ def _ping(url: str | None, failed: bool) -> None:
             notify.ping(url, failed)
         except notify.NotifyError as e:
             print(f"[warn] {e}", file=sys.stderr)
+
+
+def _record(cfg: Config, now: datetime, section: str, entry: dict[str, object], ok: bool) -> None:
+    """Update the status file, if one is set. A problem here is a warning, never a failure of the job."""
+    if cfg.status_file is None:
+        return
+    try:
+        status.record(cfg.status_file, section, entry, ok, now.timestamp())
+    except OSError as e:
+        print(f"[warn] could not write the status file: {e.strerror or e}", file=sys.stderr)
 
 
 def _mb(n: int) -> str:
@@ -108,6 +119,23 @@ def doctor(cfg: Config, now: datetime) -> int:
         report("ok" if age <= cfg.max_age_days else "warn", "newest backup", f"{complete[0]} ({age:.1f} days old)")
     else:
         report("warn", "newest backup", "none yet")
+    for label, argv in (
+        ("pre-backup command", cfg.pre_backup_command),
+        ("post-backup command", cfg.post_backup_command),
+    ):
+        if argv:
+            if shutil.which(argv[0]):
+                report("ok", label, f"{argv[0]} found (run without a shell, {cfg.command_timeout} s limit)")
+            else:
+                report("FAIL", label, f"{argv[0]} is not found or not executable")
+    if cfg.status_file is not None:
+        place = cfg.status_file.parent
+        while not place.exists() and place != place.parent:
+            place = place.parent
+        if os.access(place, os.W_OK):
+            report("ok", "status file", f"{cfg.status_file} (written after each backup and drill)")
+        else:
+            report("FAIL", "status file", f"{cfg.status_file} cannot be written by this user")
     report(
         "ok",
         "alerts",
@@ -165,18 +193,39 @@ def plan(cfg: Config, now: datetime) -> int:
 
 
 def backup(cfg: Config, now: datetime) -> int:
-    try:
-        done = store.write_backup(cfg, now)
-    except store.BackupError as e:
-        print(f"[FAIL] backup: {e}", file=sys.stderr)
+    done = None
+    problem = None
+    pre = command.run(cfg.pre_backup_command, cfg.command_timeout)
+    if pre is not None:
+        problem = f"{PREFIX}PRE_BACKUP_COMMAND failed ({pre}), so no backup was made"
+    else:
+        try:
+            done = store.write_backup(cfg, now)
+        except store.BackupError as e:
+            problem = str(e)
+    # The post command always runs when one is set: it is where a stopped app is started again.
+    post = command.run(cfg.post_backup_command, cfg.command_timeout)
+    post_text = f"{PREFIX}POST_BACKUP_COMMAND failed ({post})" if post is not None else None
+    if done is None:
+        text = f"{problem}; {post_text}" if post_text else str(problem)
+        print(f"[FAIL] backup: {text}", file=sys.stderr)
         print("Older backups were not touched.", file=sys.stderr)
-        _alert(cfg, f"BACKUP FAILED: {e}. Older backups were kept.")
+        _alert(cfg, f"BACKUP FAILED: {text}. Older backups were kept.")
         _ping(cfg.ping_url, True)
+        _record(cfg, now, "backup", {"result": "fail", "stamp": None, "files": None, "bytes": None,
+                                     "archive_bytes": None, "message": text}, False)  # fmt: skip
         return 1
     print(f"backup {done.stamp}: {done.files} files ({_mb(done.bytes)}) -> {done.archive.name}")
     print(f"  {_mb(done.archive_size)} after compression and encryption")
-    _ping(cfg.ping_url, False)
-    return _apply_prune(cfg, now)
+    entry = {"result": "ok", "stamp": done.stamp, "files": done.files, "bytes": done.bytes,
+             "archive_bytes": done.archive_size, "message": f"backup {done.stamp} written"}  # fmt: skip
+    if post_text:
+        print(f"[FAIL] {post_text}: the backup itself was written", file=sys.stderr)
+        _alert(cfg, f"Backup {done.stamp} was written, but {post_text}. An app may still be stopped.")
+        entry |= {"result": "fail", "message": f"backup {done.stamp} written, but {post_text}"}
+    _ping(cfg.ping_url, post_text is not None)
+    _record(cfg, now, "backup", entry, True)
+    return _apply_prune(cfg, now) or (1 if post_text else 0)
 
 
 def drill(cfg: Config, now: datetime) -> int:
@@ -189,6 +238,7 @@ def drill(cfg: Config, now: datetime) -> int:
     _alert(cfg, f"{heading.get(verdict.result, 'RESTORE DRILL FAILED')}: {verdict.message}")
     # Only a real pass pings success: PARTIAL (nothing decrypted) must not keep a monitor green.
     _ping(cfg.drill_ping_url, verdict.result != "ok")
+    _record(cfg, now, "drill", {"result": verdict.result, "message": verdict.message}, verdict.result == "ok")
     return 1 if verdict.result == "fail" else 0
 
 

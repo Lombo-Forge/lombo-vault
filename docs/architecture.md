@@ -30,6 +30,8 @@ sources --> store.py (walk, tar, hash) --> agebin.py --> the age program --> bac
 | `cli.py` | The commands. The only place that prints, reads the clock or sends alerts. |
 | `config.py` | Settings from `LOMBO_VAULT_*` variables. |
 | `notify.py` | Webhook alerts and healthchecks-style pings. |
+| `command.py` | Runs the optional pre- and post-backup programs: no shell, a time limit. |
+| `status.py` | The versioned status file for monitors ([contracts.md](contracts.md)): merge the two halves, clean text, write atomically. |
 
 ## Why it is split this way
 

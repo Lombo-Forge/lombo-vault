@@ -4,6 +4,7 @@
 
 - [What is protected](#what-is-protected)
 - [What the drill proves, and what it does not](#what-the-drill-proves-and-what-it-does-not)
+- [The status file and the commands](#the-status-file-and-the-commands)
 - [Key handling](#key-handling)
 - [If the key is lost](#if-the-key-is-lost)
 - [Other risks](#other-risks)
@@ -34,6 +35,12 @@ Encryption is done by the `age` program, not by this tool. LomboVault trusts age
 - that an older backup restores. Only the newest is drilled;
 - that the key in your password manager is the same one as on the drill machine. Check that the one you would use in a disaster is the one that passes.
 - anything about a `PARTIAL` result's hidden contents: it never decrypts.
+
+## The status file and the commands
+
+- The status file (`STATUS_FILE`, [contracts.md](contracts.md)) is world-readable (0644) so a monitor under another user can read it. It holds times, counts and short messages, never keys or file contents; a failure message may contain a path from your own settings. Put it in a folder only the monitor can enter if that matters.
+- `PRE_BACKUP_COMMAND` and `POST_BACKUP_COMMAND` run with the privileges of the user running the tool, no shell. Whoever can change your settings file can run a program as that user: protect the settings file like the sources.
+- A pre command that writes copies into a source folder puts those copies in the backup. Keep that folder on the data's disk and readable by the backup user only.
 
 ## Key handling
 

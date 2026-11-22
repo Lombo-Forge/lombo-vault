@@ -28,6 +28,7 @@ restore drill: OK: backup 20261121T043000Z (0.9 days old) was decrypted and unpa
 - [Commands](#commands)
 - [Settings](#settings)
 - [Scheduling](#scheduling)
+- [Plugging it into your own monitoring](#plugging-it-into-your-own-monitoring)
 - [What is not verified](#what-is-not-verified)
 - [FAQ](#faq)
 - [Contributing and licence](#contributing-and-licence)
@@ -47,7 +48,7 @@ LomboVault is for a narrower job: **small** data (app settings, databases, compo
 - It **refuses** a backup folder that is inside a source (or a source inside the backup folder), a key file or scratch folder inside a source, and a backup that would hold **no files at all** (a wrong path, a missing mount, an `EXCLUDE` that matches everything). A source that is a symlink is followed. `EXCLUDE` names are matched only below each source, never against the folders above it.
 - **Give the backup folder to this tool alone.** Retention counts and deletes every file in it that has the tool's name pattern with a real date, so a second instance (other sources or keys) or backups copied in by hand count towards each other's `KEEP`. Stamps dated more than a day ahead (a wrong clock) are never counted and the drill fails on them.
 
-What it does **not** do: it does not snapshot live databases (see [docs/how-it-works.md](docs/how-it-works.md): stop the app, or back up a copy made with the database's own backup command), does not deduplicate, does not upload anywhere, does not restore over live data for you (the restore is one documented `age` + `tar` command, in [docs/setup.md](docs/setup.md)), and does not store or guard your private key. **If you lose the private key, the backups are unreadable, forever.** Read [docs/security.md](docs/security.md).
+What it does **not** do: it does not snapshot live databases by itself (it has two hooks for that: a command that runs before the backup and one after, see [docs/how-it-works.md](docs/how-it-works.md#live-databases) for `sqlite3 .backup`, `pg_dump` and stop/start recipes), does not keep daily, weekly and monthly generations (one rule: the newest `KEEP`), does not deduplicate, does not upload anywhere, does not restore over live data for you (the restore is one documented `age` + `tar` command, in [docs/setup.md](docs/setup.md)), and does not store or guard your private key. **If you lose the private key, the backups are unreadable, forever.** Read [docs/security.md](docs/security.md).
 
 A `PARTIAL` drill result means the drill checked that the newest backup is fresh, intact (its checksum matches) and really starts as an age file, but could **not decrypt it** because no key file is set on that machine. It is not a pass: the exit code is 0, but the drill ping goes to the `/fail` address, so a monitor on that ping stays red until a key is set.
 
@@ -83,15 +84,48 @@ Details: [docs/setup.md](docs/setup.md).
 
 ## Settings
 
-Everything is an environment variable with the `LOMBO_VAULT_` prefix, listed with defaults in [.env.example](.env.example). A bad value stops the app at start-up and names the variable. `backup` refuses a backup folder on the same disk as a source (the backup would die with the data) and `doctor` shows FAIL, unless `LOMBO_VAULT_ALLOW_SAME_DISK=true`. Note that `DRY_RUN` only controls **deleting old backups**: a backup is always written.
+Everything is an environment variable with the `LOMBO_VAULT_` prefix, listed with defaults in [.env.example](.env.example).
+
+| Setting | Default | What |
+|---|---|---|
+| `SOURCES`, `BACKUP_DIR`, `RECIPIENTS` | required | What to back up, where it goes, the age public keys. |
+| `KEEP` | `7` | Complete backups kept. |
+| `EXCLUDE` | none | Globs of names to leave out. |
+| `AGE_BIN`, `KEY_FILE`, `MAX_AGE_DAYS`, `SCRATCH_DIR` | `age`, none, `10`, system temp | The age program; the private key file for the drill; how old the newest backup may be; where the drill unpacks. |
+| `WEBHOOK_URL`, `PING_URL`, `DRILL_PING_URL` | none | Alerts and healthchecks-style pings. |
+| `DRY_RUN` | `true` | `true` only lists what retention would delete; a backup is always written. Strictly `true` or `false`. |
+| `ALLOW_SAME_DISK` | `false` | `true` allows a backup folder on the same disk as a source. Strictly `true` or `false`. |
+| `PRE_BACKUP_COMMAND` | none | A program (no shell) run before the sources are read; if it fails, no backup is made. It runs even with `DRY_RUN=true` (a backup is always written). |
+| `POST_BACKUP_COMMAND` | none | A program run after every backup, also a failed one; if it fails you are alerted and the exit code is 1. |
+| `COMMAND_TIMEOUT_SECONDS` | `60` | Time limit for each of the two commands (1 to 3600). |
+| `STATUS_FILE` | none | Absolute path of the status JSON ([docs/contracts.md](docs/contracts.md)); outside every source. |
+
+ A bad value stops the app at start-up and names the variable. `backup` refuses a backup folder on the same disk as a source (the backup would die with the data) and `doctor` shows FAIL, unless `LOMBO_VAULT_ALLOW_SAME_DISK=true`. Note that `DRY_RUN` only controls **deleting old backups**: a backup is always written.
 
 ## Scheduling
 
 The tool runs once and exits; let cron or a systemd timer call it (examples in [docs/setup.md](docs/setup.md)): `backup` nightly, `drill` weekly or monthly. Give each its own ping URL (healthchecks-style) so silence is noticed.
 
+## Plugging it into your own monitoring
+
+Vault tells your monitor three ways, and each needs something from you:
+
+| What you want | How | What you add yourself |
+|---|---|---|
+| "The last backup failed" | An alert on the webhook, a `/fail` ping, exit code 1 | A webhook URL or a ping URL from a service you run or use. |
+| "The backup is stale or never ran" | `STATUS_FILE`: `backup.last_success` is the time of the last good backup | A monitor that reads the file and goes red when it is too old (a `jq` line is in [docs/contracts.md](docs/contracts.md#reading-it-from-a-monitor)), or a ping with a grace period on the service side. A dead timer sends nothing, so only a check for silence catches it. |
+| "The restore drill failed or has not run" | The same file's `drill` half, the drill ping, exit code 1 | The same, with a longer limit (a monthly drill: about 45 days). `partial` means nothing was decrypted. |
+| "The copy elsewhere is old" | Not known to Vault | Your copy job's own ping, or a check of the newest file's age at the far end ([docs/setup.md](docs/setup.md#7-copy-the-backups-elsewhere)). |
+| "The database inside is healthy" | Not proved by the drill | A `PRAGMA integrity_check` (or the database's own check) in your `PRE_BACKUP_COMMAND` script on the copy it makes; a failing check stops the backup ([recipe](docs/how-it-works.md#live-databases)). |
+| Daily, weekly and monthly generations | Only the newest `KEEP` are kept | A second instance on its own folder scheduled monthly ([docs/how-it-works.md](docs/how-it-works.md#retention)), or restic or borg. |
+| A job that starts before the backup | `PRE_BACKUP_COMMAND` | Your own script, for example a database copy or a `docker stop`. |
+
+The status file's exact shape, the version rule, the exit codes and the ping behaviour are in [docs/contracts.md](docs/contracts.md). A backup holds every secret in the files you list (a `.env`, tokens, databases), protected by the key alone: see [docs/security.md](docs/security.md).
+
 ## What is not verified
 
-- Not run against a real media stack or real app databases. SQLite files copied while an app is writing can be inconsistent; the tool does not prevent that (see [docs/how-it-works.md](docs/how-it-works.md)).
+- Not run against a real media stack or real app databases. SQLite files copied while an app is writing can be inconsistent; the tool does not prevent that by itself (the `sqlite3 .backup` and `pg_dump` recipes in [docs/how-it-works.md](docs/how-it-works.md) are untried against real apps).
+- The pre and post commands and the status file are tested with stand-in programs and the stand-in `age`, not against a real monitor. A command that starts background children can outlive its time limit.
 - The real `age` 1.2.1 (Debian package) was exercised in a throwaway container: backup, drill, two recipients, wrong key, a flipped byte and a truncated file. No other age version, no `rage`, no SSH-key recipients (not supported), no passphrase mode (not supported).
 - The same-disk refusal is tested with made-up device ids, never with two real disks. It compares device ids only, so it cannot see network shares, bind mounts, overlay filesystems or disk pools (see [docs/security.md](docs/security.md)).
 - The webhook and ping were tested against a local server, not a real Discord, Slack or healthchecks service.
