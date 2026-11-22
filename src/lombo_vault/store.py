@@ -81,7 +81,11 @@ def check_layout(cfg: Config) -> list[str]:
     sources = resolved_sources(cfg)
     problems += core.conflicts(cfg.backup_dir.resolve(), sources)
     problems += same_disk_problems(cfg)
-    for label, path in (("key file", cfg.key_file), ("scratch folder", cfg.scratch_dir)):
+    for label, path in (
+        ("key file", cfg.key_file),
+        ("scratch folder", cfg.scratch_dir),
+        ("status file", cfg.status_file),
+    ):
         if path is not None:
             inside = [s for s in sources if path.resolve().is_relative_to(s)]
             if inside:

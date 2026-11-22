@@ -28,6 +28,8 @@ clearly earns its place). It has not been run against a real stack and has not h
 | `src/lombo_vault/drill.py` | The restore drill; returns a `core.Verdict`. |
 | `src/lombo_vault/cli.py` | `doctor`, `plan`, `backup`, `drill`, `list`, `prune`. The only place that prints, reads the clock or sends alerts. |
 | `src/lombo_vault/config.py` | Settings from `LOMBO_VAULT_*` variables (`SETTINGS` lists them). |
+| `src/lombo_vault/status.py` | The versioned status file (`STATUS_FILE`): merge, clean, atomic write. Promised in `docs/contracts.md`; change both together. |
+| `src/lombo_vault/command.py` | Runs `PRE_BACKUP_COMMAND` / `POST_BACKUP_COMMAND` (no shell, time limit). |
 | `src/lombo_vault/notify.py` | Webhook alerts and healthchecks-style pings. |
 | `src/lombo_vault/jellyfin.py` | Template leftover, unused; delete it. |
 | `tests/` | pytest. `conftest.py` writes a fake `age` (a reversible XOR) onto `PATH`; `test_real_age.py` runs only when the real `age` and `age-keygen` exist. |

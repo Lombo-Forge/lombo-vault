@@ -42,6 +42,9 @@ Copy `.env.example` to `.env` and set:
 - `LOMBO_VAULT_EXCLUDE`: caches, logs, transcode folders.
 - `LOMBO_VAULT_WEBHOOK_URL`, `LOMBO_VAULT_PING_URL`, `LOMBO_VAULT_DRILL_PING_URL`: optional but recommended.
 
+- What goes in `SOURCES`: every folder and file you cannot rebuild, including single files such as a `.env` or a compose file. They are stored inside the encrypted archive like everything else, so secrets in them are protected by the key, not by file permissions: the backup holds every token and password those files hold, and so does anyone who holds both the backups and the private key. Keep the key apart from the backups ([security.md](security.md)).
+- `LOMBO_VAULT_PRE_BACKUP_COMMAND`, `LOMBO_VAULT_POST_BACKUP_COMMAND`, `LOMBO_VAULT_COMMAND_TIMEOUT_SECONDS`, `LOMBO_VAULT_STATUS_FILE`: optional ([how-it-works.md](how-it-works.md#live-databases), [contracts.md](contracts.md)).
+
 Then run `lombo-vault doctor`. Every line should say `ok` (the key file line is a `warn` until you set one).
 
 ## 3. First backup
@@ -89,7 +92,7 @@ WantedBy=timers.target
 
 Make a second pair for `drill` with `OnCalendar=monthly` (or weekly). Cron works too: `30 4 * * * . /etc/lombo-vault.env && lombo-vault backup` needs the variables exported; a systemd `EnvironmentFile` is simpler.
 
-If an app must be stopped for a consistent copy ([how-it-works.md](how-it-works.md#live-databases)), use `ExecStartPre=` and `ExecStopPost=` lines to stop and start it.
+If a database needs a consistent copy, or an app must be stopped for the minute the backup takes, use `LOMBO_VAULT_PRE_BACKUP_COMMAND` and `LOMBO_VAULT_POST_BACKUP_COMMAND` with a small script of your own, with recipes in [how-it-works.md](how-it-works.md#live-databases). The post command runs even when the backup failed, so a stopped app is started again. To let a monitor see the result, set `LOMBO_VAULT_STATUS_FILE` ([contracts.md](contracts.md)); give the drill's timer the same value if it runs on the same machine.
 
 ## 6. Who runs it
 
@@ -133,6 +136,20 @@ rclone copy /var/backups/lombo-vault REMOTE:lombo-vault --immutable
 `copy` never deletes at the far end, and `--immutable` makes it refuse to change a file that is already there (backup
 names carry the time, so a changed old file means something is wrong). Give the remote's credentials write access
 but not delete access if the provider allows it.
+
+**rsync, pulled by a key that can only read.** In the `vault` user's `~/.ssh/authorized_keys` on the server, one line per
+other machine (`rrsync` ships with the rsync package; its path differs between systems):
+
+```text
+restrict,command="rrsync -ro /var/backups/lombo-vault" ssh-ed25519 AAAA... offsite-pull
+```
+
+That key can read the backup folder with rsync and do nothing else, so a stolen offsite machine cannot change or delete the
+server's backups. The files are owned by the backup user and closed to others (folder `700`, files `600`), so the
+pull must log in as that user; the tool does not set up a shared group for you.
+
+Nothing tells Vault whether the copy ran. Give the copy job its own ping (healthchecks-style), or check the age of the newest
+file at the far end from your monitor ([README](../README.md#plugging-it-into-your-own-monitoring)).
 
 Whichever you pick, **drill the copy**, not just the original: copy the newest file somewhere with the key and run
 `lombo-vault drill` there (step 4). A copy nobody has restored is a guess.

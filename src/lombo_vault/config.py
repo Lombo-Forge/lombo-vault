@@ -7,6 +7,7 @@ and only `drill` and `doctor` ever read it.
 """
 
 import re
+import shlex
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlparse
@@ -28,6 +29,10 @@ SETTINGS = (
     "DRILL_PING_URL",
     "DRY_RUN",
     "ALLOW_SAME_DISK",
+    "PRE_BACKUP_COMMAND",
+    "POST_BACKUP_COMMAND",
+    "COMMAND_TIMEOUT_SECONDS",
+    "STATUS_FILE",
 )
 
 # An age public key: "age1" then 58 lowercase bech32 characters. SSH-key recipients are not accepted (kept simple).
@@ -54,6 +59,10 @@ class Config:
     drill_ping_url: str | None
     dry_run: bool
     allow_same_disk: bool
+    pre_backup_command: tuple[str, ...]  # empty means none; run without a shell
+    post_backup_command: tuple[str, ...]
+    command_timeout: int
+    status_file: Path | None
 
 
 def _truthy(value: str, name: str) -> bool:
@@ -90,13 +99,23 @@ def _url(value: str, name: str) -> str | None:
     return value
 
 
-def _whole(value: str, name: str, minimum: int) -> int:
+def _command(value: str, name: str) -> tuple[str, ...]:
+    """A program and its arguments, split like a shell would but never run by one. Empty means none."""
+    try:
+        return tuple(shlex.split(value))
+    except ValueError as e:
+        raise ConfigError(f"{PREFIX}{name} is not a valid command: {e}") from None
+
+
+def _whole(value: str, name: str, minimum: int, maximum: int | None = None) -> int:
     try:
         number = int(value)
     except ValueError:
         raise ConfigError(f"{PREFIX}{name} must be a whole number") from None
     if number < minimum:
         raise ConfigError(f"{PREFIX}{name} must be at least {minimum}")
+    if maximum is not None and number > maximum:
+        raise ConfigError(f"{PREFIX}{name} must be at most {maximum}")
     return number
 
 
@@ -127,6 +146,7 @@ def from_env(env: dict[str, str]) -> Config:
 
     key = get("KEY_FILE")
     scratch = get("SCRATCH_DIR")
+    status = get("STATUS_FILE")
     return Config(
         sources=sources,
         backup_dir=backup_dir,
@@ -143,4 +163,8 @@ def from_env(env: dict[str, str]) -> Config:
         # Safe by default: old backups are only deleted after the person sets DRY_RUN=false.
         dry_run=_truthy(get("DRY_RUN", "true") or "true", "DRY_RUN"),
         allow_same_disk=_truthy(get("ALLOW_SAME_DISK", "false") or "false", "ALLOW_SAME_DISK"),
+        pre_backup_command=_command(get("PRE_BACKUP_COMMAND"), "PRE_BACKUP_COMMAND"),
+        post_backup_command=_command(get("POST_BACKUP_COMMAND"), "POST_BACKUP_COMMAND"),
+        command_timeout=_whole(get("COMMAND_TIMEOUT_SECONDS", "60"), "COMMAND_TIMEOUT_SECONDS", 1, 3600),
+        status_file=_absolute(status, "STATUS_FILE") if status else None,
     )
