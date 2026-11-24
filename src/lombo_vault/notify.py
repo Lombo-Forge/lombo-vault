@@ -30,7 +30,7 @@ def send(url: str, message: str, timeout: float = 10) -> None:
     body = json.dumps({"content": message, "text": message}).encode()
     try:
         req = urllib.request.Request(  # noqa: S310
-            url, data=body, method="POST", headers={"Content-Type": "application/json"}
+            url, data=body, method="POST", headers={"Content-Type": "application/json", "User-Agent": "lombo-vault"}
         )
     except ValueError:
         raise NotifyError("webhook failed (the address is not valid)") from None
